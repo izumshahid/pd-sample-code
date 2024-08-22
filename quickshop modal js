@@ -1,0 +1,678 @@
+
+async function getProdInfo(id) {
+  let adminId = "";
+  adminId = `gid://shopify/Product/${id}`;
+
+  if (String(id).includes("gid")) {
+    adminId = id;
+  }
+
+  var data = JSON.stringify({
+    query: `{
+        product(id: "${adminId}"){
+          title
+          id
+          handle
+          vendor
+          onlineStoreUrl
+          featuredImage{
+            url
+          }   
+          images (first:6){
+            nodes{
+              url
+            }
+          }
+          variants(first:25){
+            
+              nodes{
+                id
+                title
+                sku
+                quantityAvailable 
+                compareAtPrice{
+                  amount
+                }
+                price{
+                  amount
+                }
+                metafield(key:"variant_shipping_info",namespace:"custom") {
+                  value
+                }
+              }
+            
+          }
+          metafields(identifiers : [
+            {namespace:"custom", key:"regular"},
+            {namespace:"custom", key:"petite"},
+            {namespace:"custom", key:"tall"}
+          ]){
+            key
+            value            
+          }
+        }
+      }`,
+  });
+
+  var config = {
+    method: "post",
+    url: "https://printfresh.myshopify.com/api/2024-04/graphql.json",
+    headers: {
+      "X-Shopify-storefront-Access-Token": "xxxxxxxx",
+      "Content-Type": "application/json",
+    },
+    data: data,
+  };
+
+  try {
+    const resp = await axios(config);
+    return resp;
+  } catch (e) {
+    console.log("==>> error <<==", e.message);
+  }
+}
+
+function closeQuickShop() {
+  $("#quickShopModal").css("display", "none");
+  $(".quickShopModal").removeClass("show");
+  $("#selectedSize").html("");
+  $("#selectedSizeMob").html("");
+}
+
+function getProduct(id) {
+  $("#selectedSize").text(``);
+  $("#selectedSizeMob").text(``);
+  $("#activeVariantQuantity").text(``);
+  $("#activeVariantQuantityMob").text(``);
+  $("#activeVariantQuantityQS").text(``);
+  $("#activeVariantQuantityQSMob").text(``);
+  quickShopClicked(id);
+  selectVariantMobile("default_value");
+}
+
+function selectVariant(
+  variant_type,
+  quantity,
+  product_title,
+  productSku,
+  variant_shipping_info
+) {
+  // if prod is not avaiable then just return
+  if (Number(quantity) <= 0) {
+    return;
+  }
+  const product_shipping_message = $("#product_shipping_message").text();
+  if (product_shipping_message === "") {
+    if (variant_shipping_info !== "null") {
+      $("#variant_shipping_message").text(variant_shipping_info);
+    } else {
+      $("#variant_shipping_message").text(``);
+    }
+  }
+
+  $("#activeVariantQuantityQS").text(``);
+  $("#activeVariantQuantityQSMob").text(``);
+
+  dataLayer.push({
+    event: "select_size",
+    item_name: product_title.replace(/\s+/g, " "),
+    item_id: productSku.split("-").slice(0, 1).join("-"),
+    item_size: variant_type,
+  });
+
+  //remove class from all
+  $(".prodVarSizes_CTA").removeClass("is-selected");
+
+  if (quantity <= 10 && quantity > 0) {
+    $("#activeVariantQuantityQS").text(`Only ${quantity} Left in stock!`);
+    $("#activeVariantQuantityQSMob").text(`Only ${quantity} Left in stock!`);
+  } else if (quantity > 10) {
+    $("#activeVariantQuantityQS").text(``);
+    $("#activeVariantQuantityQSMob").text(``);
+  }
+
+  //add class to only selected one
+  const query = `.prodVarSizes_CTA[value='${variant_type}']`;
+  $(query).addClass("is-selected");
+
+  //setting price
+  const selected_variant = prod_variant_global.find(
+    ({ title }) => title == variant_type
+  );
+  //setting price
+  let prod_price = selected_variant.price.amount;
+  let compared_price = selected_variant.compareAtPrice;
+  pricesComparisonWithOrg(prod_price, compared_price);
+
+  $(".cusModaladdToCart").css("background", "#245490").css("cursor", "pointer");
+  if (
+    variant_type.indexOf("Regular Size") < 0 &&
+    variant_type.indexOf("Petite Size") < 0 &&
+    variant_type.indexOf("Tall Size") < 0
+  ) {
+    $("#selectedSize").html(variant_type);
+    $("#selectedSizeMob").html(variant_type);
+  }
+}
+function selectVariantMobile(value) {
+  if (value !== "default_value") {
+    document.getElementsByClassName(
+      "cusModaladdToCartMobile"
+    )[0].style.background = "rgb(36, 84, 144)";
+    document.querySelector(".select__trigger").style.color = "black";
+    document.getElementsByClassName("cusModaladdToCartMobile")[0].style.cursor =
+      "pionter";
+  } else {
+    document.getElementsByClassName(
+      "cusModaladdToCartMobile"
+    )[0].style.background = "rgba(240, 237, 237, 0.72)";
+    document.querySelector(".select__trigger").style.color = "#cccccc";
+  }
+}
+
+function selectVariantMobileSV(value) {
+  if (value !== "default_value") {
+    document.getElementsByClassName(
+      "cusModaladdToCartMobile"
+    )[0].style.background = "rgb(36, 84, 144)";
+    document.getElementsByClassName("cusModaladdToCartMobile")[0].style.cursor =
+      "pionter";
+    const variantShippingInfo = $("#variant_shipping_message").text();
+  } else {
+    document.getElementsByClassName(
+      "cusModaladdToCartMobile"
+    )[0].style.background = "rgba(240, 237, 237, 0.72)";
+  }
+}
+
+async function quickShopModalAddToCartMobile() {
+  let selectedValue = document.querySelector(".custom-option.selected");
+  let finalSalesMessage = document.getElementById(
+    "cust_highlight_promo"
+  ).innerText;
+  finalSalesMessage = String(finalSalesMessage);
+  let product_shipping_message = document.getElementById(
+    "product_shipping_message"
+  ).innerText;
+  product_shipping_message = String(product_shipping_message);
+  let variant_shipping_message = document.getElementById(
+    "variant_shipping_message"
+  ).innerText;
+  variant_shipping_message = String(variant_shipping_message);
+
+  if (selectedValue) {
+    selectedValue = selectedValue.getAttribute("data-value");
+    if (selectedValue === "default_value") {
+      return;
+    } else {
+      selectedValue = String(selectedValue).split("ProductVariant/")[1];
+
+      try {
+        if (product_shipping_message !== "") {
+          if (finalSalesMessage !== "" && product_shipping_message === "") {
+            let body = {
+              id: selectedValue,
+              quantity: 1,
+              properties: {
+                "Final Sale": finalSalesMessage
+                  ? finalSalesMessage.split("-")[1]
+                  : "",
+              },
+            };
+            await fetch("/cart/add.js", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(body),
+            });
+          }
+          if (finalSalesMessage === "" && product_shipping_message !== "") {
+            let body = {
+              id: selectedValue,
+              quantity: 1,
+              properties: {
+                "Shipping Info": product_shipping_message,
+              },
+            };
+            await fetch("/cart/add.js", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(body),
+            });
+          }
+          if (finalSalesMessage === "" && product_shipping_message === "") {
+            let body = {
+              id: selectedValue,
+              quantity: 1,
+            };
+            await fetch("/cart/add.js", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(body),
+            });
+          }
+          if (finalSalesMessage !== "" && product_shipping_message !== "") {
+            let body = {
+              id: selectedValue,
+              quantity: 1,
+              properties: {
+                "Final Sale": finalSalesMessage
+                  ? finalSalesMessage.split("-")[1]
+                  : "",
+                "Shipping Info": product_shipping_message,
+              },
+            };
+            await fetch("/cart/add.js", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(body),
+            });
+          }
+        } else {
+          if (finalSalesMessage !== "" && variant_shipping_message === "") {
+            let body = {
+              id: selectedValue,
+              quantity: 1,
+              properties: {
+                "Final Sale": finalSalesMessage
+                  ? finalSalesMessage.split("-")[1]
+                  : "",
+              },
+            };
+            await fetch("/cart/add.js", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(body),
+            });
+          }
+          if (finalSalesMessage === "" && variant_shipping_message !== "") {
+            let body = {
+              id: selectedValue,
+              quantity: 1,
+              properties: {
+                "Shipping Info": variant_shipping_message,
+              },
+            };
+            await fetch("/cart/add.js", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(body),
+            });
+          }
+          if (finalSalesMessage === "" && variant_shipping_message === "") {
+            let body = {
+              id: selectedValue,
+              quantity: 1,
+            };
+            await fetch("/cart/add.js", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(body),
+            });
+          }
+          if (finalSalesMessage !== "" && variant_shipping_message !== "") {
+            let body = {
+              id: selectedValue,
+              quantity: 1,
+              properties: {
+                "Final Sale": finalSalesMessage
+                  ? finalSalesMessage.split("-")[1]
+                  : "",
+                "Shipping Info": variant_shipping_message,
+              },
+            };
+            await fetch("/cart/add.js", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(body),
+            });
+          }
+        }
+
+        closeQuickShop();
+        custom_cart_data();
+      } catch (e) {
+        console.log("==>> error quickShopModalAddToCart :", e.message);
+      }
+    }
+  } else {
+    if (!$(".prodVarSizes_CTA.is-selected").length) {
+      return;
+    }
+    let variant_id = $(".prodVarSizes_CTA.is-selected").attr("variant_id");
+
+    try {
+      let body = {
+        id: variant_id,
+        quantity: 1,
+        properties: {
+          "Final Sale": finalSalesMessage
+            ? finalSalesMessage.split("-")[1]
+            : "",
+          "Shipping Info": variant_shipping_message,
+        },
+      };
+      const added = await fetch("/cart/add.js", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+      closeQuickShop();
+      custom_cart_data();
+    } catch (e) {
+      console.log("==>> error quickShopModalAddToCart :", e.message);
+    }
+  }
+}
+async function quickShopModalAddToCart() {
+  let _esid;
+  try {
+    _esid = EasySizeParametersDebug.easysize.pageview_id.toString();
+  } catch (e) {
+    _esid = "-1";
+  }
+  let val = document.getElementById("comparedPrice").innerHTML;
+  if (String(val).includes("$")) {
+    val = String(val).replace("$", "");
+  }
+  if (val && !String(val).includes(".0")) {
+    val = String(val).replace(val, `${val}.00`);
+  }
+  if (!$(".prodVarSizes_CTA.is-selected").length) {
+    return;
+  }
+  let variant_id = $(".prodVarSizes_CTA.is-selected").attr("variant_id");
+
+  let product_name = $(".prodVarSizes_CTA.is-selected").attr("product_title");
+  let variant_name = $(".prodVarSizes_CTA.is-selected").attr("value");
+  let variant_sku = String($(".prodVarSizes_CTA.is-selected").attr("sku"))
+    .split("-")
+    .slice(0, 1)
+    .join("-");
+  let variant_price = $(".prodVarSizes_CTA.is-selected").attr("price");
+  variant_id = String(variant_id).split("ProductVariant/")[1];
+
+  let finalSalesMessage = document.getElementById(
+    "cust_highlight_promo"
+  ).innerText;
+  finalSalesMessage = String(finalSalesMessage);
+  let product_shipping_message = document.getElementById(
+    "product_shipping_message"
+  ).innerText;
+  product_shipping_message = String(product_shipping_message);
+  let variant_shipping_message = document.getElementById(
+    "variant_shipping_message"
+  ).innerText;
+  variant_shipping_message = String(variant_shipping_message);
+
+  let body;
+
+  if (product_shipping_message !== "") {
+    if (finalSalesMessage !== "" && product_shipping_message === "") {
+      if (val) {
+        body = {
+          id: variant_id,
+          quantity: 1,
+          properties: {
+            OriginalPrice: `${val}`,
+            "Final Sale": finalSalesMessage
+              ? finalSalesMessage.split("-")[1]
+              : "",
+            _esid: _esid,
+          },
+        };
+      } else {
+        body = {
+          id: variant_id,
+          quantity: 1,
+          properties: {
+            "Final Sale": finalSalesMessage
+              ? finalSalesMessage.split("-")[1]
+              : "",
+            _esid: _esid,
+          },
+        };
+      }
+    }
+    if (finalSalesMessage === "" && product_shipping_message !== "") {
+      if (val) {
+        body = {
+          id: variant_id,
+          quantity: 1,
+          properties: {
+            OriginalPrice: `${val}`,
+            "Shipping Info": product_shipping_message,
+            _esid: _esid,
+          },
+        };
+      } else {
+        body = {
+          id: variant_id,
+          quantity: 1,
+          properties: {
+            "Shipping Info": product_shipping_message,
+            _esid: _esid,
+          },
+        };
+      }
+    }
+    if (finalSalesMessage === "" && product_shipping_message === "") {
+      if (val) {
+        body = {
+          id: variant_id,
+          quantity: 1,
+          properties: {
+            OriginalPrice: `${val}`,
+            _esid: _esid,
+          },
+        };
+      } else {
+        body = {
+          id: variant_id,
+          quantity: 1,
+          properties: {
+            _esid: _esid,
+          },
+        };
+      }
+    }
+    if (finalSalesMessage !== "" && product_shipping_message !== "") {
+      if (val) {
+        body = {
+          id: variant_id,
+          quantity: 1,
+          properties: {
+            OriginalPrice: `${val}`,
+            "Shipping Info": product_shipping_message,
+            "Final Sale": finalSalesMessage
+              ? finalSalesMessage.split("-")[1]
+              : "",
+            _esid: _esid,
+          },
+        };
+      } else {
+        body = {
+          id: variant_id,
+          quantity: 1,
+          properties: {
+            "Shipping Info": variant_shipping_message,
+            "Final Sale": finalSalesMessage
+              ? finalSalesMessage.split("-")[1]
+              : "",
+            _esid: _esid,
+          },
+        };
+      }
+    }
+  } else {
+    if (finalSalesMessage !== "" && variant_shipping_message === "") {
+      if (val) {
+        body = {
+          id: variant_id,
+          quantity: 1,
+          properties: {
+            OriginalPrice: `${val}`,
+            "Final Sale": finalSalesMessage
+              ? finalSalesMessage.split("-")[1]
+              : "",
+            _esid: _esid,
+          },
+        };
+      } else {
+        body = {
+          id: variant_id,
+          quantity: 1,
+          properties: {
+            "Final Sale": finalSalesMessage
+              ? finalSalesMessage.split("-")[1]
+              : "",
+            _esid: _esid,
+          },
+        };
+      }
+    }
+    if (finalSalesMessage === "" && variant_shipping_message !== "") {
+      if (val) {
+        body = {
+          id: variant_id,
+          quantity: 1,
+          properties: {
+            OriginalPrice: `${val}`,
+            "Shipping Info": variant_shipping_message,
+            _esid: _esid,
+          },
+        };
+      } else {
+        body = {
+          id: variant_id,
+          quantity: 1,
+          properties: {
+            "Shipping Info": variant_shipping_message,
+            _esid: _esid,
+          },
+        };
+      }
+    }
+    if (finalSalesMessage === "" && variant_shipping_message === "") {
+      if (val) {
+        body = {
+          id: variant_id,
+          quantity: 1,
+          properties: {
+            OriginalPrice: `${val}`,
+            _esid: _esid,
+          },
+        };
+      } else {
+        body = {
+          id: variant_id,
+          quantity: 1,
+          properties: {
+            _esid: _esid,
+          },
+        };
+      }
+    }
+    if (finalSalesMessage !== "" && variant_shipping_message !== "") {
+      if (val) {
+        body = {
+          id: variant_id,
+          quantity: 1,
+          properties: {
+            OriginalPrice: `${val}`,
+            "Shipping Info": variant_shipping_message,
+            "Final Sale": finalSalesMessage
+              ? finalSalesMessage.split("-")[1]
+              : "",
+            _esid: _esid,
+          },
+        };
+      } else {
+        body = {
+          id: variant_id,
+          quantity: 1,
+          properties: {
+            "Shipping Info": variant_shipping_message,
+            "Final Sale": finalSalesMessage
+              ? finalSalesMessage.split("-")[1]
+              : "",
+            _esid: _esid,
+          },
+        };
+      }
+    }
+  }
+
+  try {
+    const added = await fetch("/cart/add.js", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+    const ga_product_name = product_name.replace(/[^a-zA-Z0-9- ]/g, "");
+    dataLayer.push({ ecommerce: null });
+    dataLayer.push({
+      event: "add_to_cart",
+      ecommerce: {
+        items: [
+          {
+            item_name: ga_product_name.replace(/\s+/g, " "),
+            item_id: variant_sku,
+            price: Number(variant_price),
+            currency: "USD",
+            product_size: variant_name,
+            item_variant: variant_name,
+            color: String(ga_product_name).split("-").at(-1).trim(),
+            quantity: 1,
+          },
+        ],
+      },
+    });
+
+    closeQuickShop();
+
+    custom_cart_data();
+  } catch (e) {
+    console.log("==>> error quickShopModalAddToCart :", e.message);
+  }
+}
+
+function pricesComparisonWithOrg(prod_price, comp_price) {
+  if (prod_price.includes(".0")) {
+    prod_price = prod_price.split(".")[0];
+  }
+  if (comp_price?.amount?.includes(".0")) {
+    compared_price = comp_price.amount.split(".")[0];
+  } else {
+    compared_price = comp_price?.amount;
+  }
+
+  if (!comp_price || prod_price == compared_price) {
+    $("#quickShopPrice").text("$" + prod_price);
+    $("#quickShopPrice").removeClass("red-text");
+    $("#comparedPrice").text("");
+  } else {
+    $("#quickShopPrice").text("$" + prod_price);
+    $("#quickShopPrice").addClass("red-text");
+    $("#comparedPrice").text("$" + compared_price);
+  }
+}
